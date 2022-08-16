@@ -14,6 +14,7 @@ import os
 import sys
 from argparse import Namespace
 from itertools import chain
+import pickle as pkl
 
 import numpy as np
 import torch
@@ -55,6 +56,50 @@ def get_symbols_to_strip_from_output(generator):
         return generator.symbols_to_strip_from_output
     else:
         return {generator.eos}
+
+# =======NLP-47 add block=======
+
+
+def save_size_dict_to_pkl(dstore_path: str, count_dict):
+    with open(dstore_path + "_file_counts.pkl", "wb") as outfile:
+        pkl.dump(count_dict, outfile)
+
+
+def save_in_dstore(keys_mmap, vals_mmap, dec_out, dstore_idx, start_idx, end_idx, key_size, key_dtype, val_dtype):
+    if keys_mmap is None or vals_mmap is None or start_idx == end_idx:
+        return
+    try:
+        keys_mmap[dstore_idx:end_idx+dstore_idx] = dec_out['dstore_keys_mt'][start_idx:start_idx+end_idx].view(
+            -1, key_size).cpu().numpy().astype(key_dtype)
+        vals_mmap[dstore_idx:end_idx+dstore_idx] = dec_out['tokens'][start_idx:start_idx+end_idx].view(
+            -1, 1).cpu().numpy().astype(val_dtype)
+    except:
+        print(dstore_idx, start_idx, end_idx)
+        raise Exception
+
+
+def create_new_dstore(mmap_path, cur_subset_count, key_dtype, val_dtype, key_size, chunk_size, prev_keys_mmap, prev_vals_mmap):
+    if prev_keys_mmap is not None and prev_vals_mmap is not None:
+        prev_keys_mmap.flush()
+        prev_vals_mmap.flush()
+        cur_subset_count += 1
+
+    keys_mmap = np.memmap(mmap_path + f"_keys_{cur_subset_count}.npy",
+                          dtype=key_dtype, mode='w+', shape=(chunk_size, key_size))
+    vals_mmap = np.memmap(mmap_path + f"_vals_{cur_subset_count}.npy",
+                          dtype=val_dtype, mode='w+', shape=(chunk_size, 1))
+    return keys_mmap, vals_mmap, cur_subset_count
+
+
+def check_dstore_availability(keys_mmap, vals_mmap, num_new_items, dstore_idx, chunk_size):
+    if keys_mmap is None or vals_mmap is None:
+        return False, 0
+    if num_new_items + dstore_idx < chunk_size:
+        return True, num_new_items
+    else:
+        return False, chunk_size - dstore_idx
+
+# =======NLP-47 add block=======
 
 
 def _main(cfg: DictConfig, output_file):
@@ -163,7 +208,8 @@ def _main(cfg: DictConfig, output_file):
     # Initialize generator
     gen_timer = StopwatchMeter()
 
-    extra_gen_cls_kwargs = {"lm_model": lms[0], "lm_weight": cfg.generation.lm_weight}
+    extra_gen_cls_kwargs = {"lm_model": lms[0], "lm_weight": cfg.generation.lm_weight,
+                            "knnmt_key_type": cfg.task.knnmt_key_type, "save_knnmt_dstore": True if cfg.generation.save_knnmt_dstore else False}
     generator = task.build_generator(
         models, cfg.generation, extra_gen_cls_kwargs=extra_gen_cls_kwargs
     )
@@ -184,6 +230,20 @@ def _main(cfg: DictConfig, output_file):
     num_sentences = 0
     has_target = True
     wps_meter = TimeMeter()
+
+    # =======NLP-47 add block=======
+    dstore_idx = 0
+    num_saved = 0
+    knnmt_key_size = models[0].decoder.embed_dim
+    knnmt_key_dtype = np.float32
+    knnmt_val_dtype = np.int
+    dstore_subset_size = {}
+    dstore_chunk_size = cfg.generation.dstore_chunk_size
+    cur_subset_count = 0
+    dstore_keys = None
+    dstore_vals = None
+    # =======NLP-47 add block=======
+
     for sample in progress:
         sample = utils.move_to_cuda(sample) if use_cuda else sample
         if "net_input" not in sample:
@@ -205,11 +265,17 @@ def _main(cfg: DictConfig, output_file):
             prefix_tokens=prefix_tokens,
             constraints=constraints,
         )
+
         num_generated_tokens = sum(len(h[0]["tokens"]) for h in hypos)
         gen_timer.stop(num_generated_tokens)
 
+        # print(hypos[0][0]['dstore_keys_mt'].shape, hypos[0][0]['dstore_keys_mt'][0, 0].dtype)
         for i, sample_id in enumerate(sample["id"].tolist()):
             has_target = sample["target"] is not None
+
+            # print(hypos[i][0]['tokens'], hypos[i][0]['dstore_keys_mt'].shape)
+            # line_items = [x.item() for x in hypos[i][0]['tokens']]
+            # print([tgt_dict.__getitem__(x) for x in line_items])
 
             # Remove padding
             if "src_tokens" in sample["net_input"]:
@@ -224,6 +290,34 @@ def _main(cfg: DictConfig, output_file):
                 target_tokens = (
                     utils.strip_pad(sample["target"][i, :], tgt_dict.pad()).int().cpu()
                 )
+
+            # ========NLP-47 add block==========
+            if cfg.generation.save_knnmt_dstore:
+                hypo = hypos[i][0]
+                num_items = len(hypo['tokens'])
+
+                fully_available, cur_capacity = check_dstore_availability(
+                    dstore_keys, dstore_vals, num_items, dstore_idx, dstore_chunk_size)
+                if fully_available:
+                    save_in_dstore(dstore_keys, dstore_vals, hypo, dstore_idx,
+                                   0, num_items, knnmt_key_size, knnmt_key_dtype, knnmt_val_dtype)
+                    dstore_idx += num_items
+                else:
+                    print(num_saved, dstore_chunk_size, dstore_idx, cur_capacity, num_items)
+                    save_in_dstore(dstore_keys, dstore_vals, hypo, dstore_idx, 0, cur_capacity,
+                                   knnmt_key_size, knnmt_key_dtype, knnmt_val_dtype)
+                    dstore_keys, dstore_vals, cur_subset_count = create_new_dstore(cfg.generation.dstore_path, cur_subset_count, knnmt_key_dtype,
+                                                                                   knnmt_val_dtype, knnmt_key_size, dstore_chunk_size, dstore_keys, dstore_vals)
+                    dstore_subset_size[cur_subset_count] = dstore_chunk_size
+                    dstore_idx = 0
+                    save_in_dstore(dstore_keys, dstore_vals, hypo, dstore_idx, cur_capacity, num_items-cur_capacity,
+                                   knnmt_key_size, knnmt_key_dtype, knnmt_val_dtype)
+                    dstore_idx += (num_items - cur_capacity)
+                num_saved += num_items
+
+            if cfg.generation.save_knnmt_dstore and cfg.generation.score_reference:
+                continue
+            # ========NLP-47 add block==========
 
             # Either retrieve the original sentences or regenerate them from tokens.
             if align_dict is not None:
@@ -361,11 +455,19 @@ def _main(cfg: DictConfig, output_file):
                     else:
                         scorer.add(target_tokens, hypo_tokens)
 
+        # exit()
         wps_meter.update(num_generated_tokens)
         progress.log({"wps": round(wps_meter.avg)})
         num_sentences += (
             sample["nsentences"] if "nsentences" in sample else sample["id"].numel()
         )
+
+    # ========NLP-47 add block==========
+    dstore_subset_size[cur_subset_count] = dstore_idx
+    save_size_dict_to_pkl(cfg.generation.dstore_path, dstore_subset_size)
+    print(f"added {num_saved} items to the knnmt dstore!")
+    print(f"added {dstore_idx} items to the last memmap!")
+    # ========NLP-47 add block==========
 
     logger.info("NOTE: hypothesis and token scores are output in base 2")
     logger.info(
@@ -388,12 +490,15 @@ def _main(cfg: DictConfig, output_file):
                     "If you are using BPE on the target side, the BLEU score is computed on BPE tokens, not on proper words.  Use --sacrebleu for standard 13a BLEU tokenization"
                 )
         # use print to be consistent with other main outputs: S-, H-, T-, D- and so on
-        print(
-            "Generate {} with beam={}: {}".format(
-                cfg.dataset.gen_subset, cfg.generation.beam, scorer.result_string()
-            ),
-            file=output_file,
-        )
+
+        # ========NLP-47 del block==========
+        # print(
+        #     "Generate {} with beam={}: {}".format(
+        #         cfg.dataset.gen_subset, cfg.generation.beam, scorer.result_string()
+        #     ),
+        #     file=output_file,
+        # )
+        # ========NLP-47 del block==========
 
     return scorer
 
@@ -409,6 +514,7 @@ def cli_main():
         help="Model architecture. For constructing tasks that rely on "
         "model args (e.g. `AudioPretraining`)",
     )
+
     args = options.parse_args_and_arch(parser)
     main(args)
 

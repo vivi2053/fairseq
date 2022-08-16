@@ -262,6 +262,12 @@ class TranslationConfig(FairseqDataclass):
     eval_bleu_print_samples: bool = field(
         default=False, metadata={"help": "print sample generations during validation"}
     )
+    # =======NLP-47 add block=======
+    knnmt_key_type: str = field(
+        default="last_ffn_input",
+        metadata={"help": "feature from the decoder to use as key for knnmt datastore"}
+    )
+    # =======NLP-47 add block=======
 
 
 @register_task("translation", dataclass=TranslationConfig)

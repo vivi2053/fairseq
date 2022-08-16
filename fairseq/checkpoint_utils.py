@@ -151,7 +151,7 @@ def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss):
                 if x[1] % cfg.keep_interval_updates_pattern != 0
             ]
 
-        for old_chk in checkpoints[cfg.keep_interval_updates :]:
+        for old_chk in checkpoints[cfg.keep_interval_updates:]:
             if os.path.lexists(old_chk):
                 os.remove(old_chk)
             elif PathManager.exists(old_chk):
@@ -162,7 +162,7 @@ def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss):
         checkpoints = checkpoint_paths(
             cfg.save_dir, pattern=r"checkpoint(\d+){}\.pt".format(suffix)
         )
-        for old_chk in checkpoints[cfg.keep_last_epochs :]:
+        for old_chk in checkpoints[cfg.keep_last_epochs:]:
             if os.path.lexists(old_chk):
                 os.remove(old_chk)
             elif PathManager.exists(old_chk):
@@ -178,7 +178,7 @@ def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss):
         )
         if not cfg.maximize_best_checkpoint_metric:
             checkpoints = checkpoints[::-1]
-        for old_chk in checkpoints[cfg.keep_best_checkpoints :]:
+        for old_chk in checkpoints[cfg.keep_best_checkpoints:]:
             if os.path.lexists(old_chk):
                 os.remove(old_chk)
             elif PathManager.exists(old_chk):
@@ -418,7 +418,6 @@ def load_model_ensemble_and_task(
             filename = get_maybe_sharded_checkpoint_filename(
                 orig_filename, suffix, shard_idx, num_shards
             )
-
             if not PathManager.exists(filename):
                 raise IOError("Model file not found: {}".format(filename))
             if state is None:
@@ -786,7 +785,7 @@ def prune_state_dict(state_dict, model_cfg: Optional[DictConfig]):
                 new_state_key = (
                     layer_name[: substitution_match.start(1)]
                     + new_layer_number
-                    + layer_name[substitution_match.end(1) :]
+                    + layer_name[substitution_match.end(1):]
                 )
                 new_state_dict[new_state_key] = state_dict[layer_name]
 
@@ -832,7 +831,7 @@ def load_pretrained_component_from_model(
     for key in state["model"].keys():
         if key.startswith(component_type):
             # encoder.input_layers.0.0.weight --> input_layers.0.0.weight
-            component_subkey = key[len(component_type) + 1 :]
+            component_subkey = key[len(component_type) + 1:]
             component_state_dict[component_subkey] = state["model"][key]
     component.load_state_dict(component_state_dict, strict=strict)
     return component

@@ -19,12 +19,22 @@ class SequenceScorer(object):
         compute_alignment=False,
         eos=None,
         symbols_to_strip_from_output=None,
+        # =======NLP-47 add block=======
+        lm_model=None,
+        lm_weight=1.0,
+        knnmt_key_type=None,
+        save_knnmt_dstore=None
+        # =======NLP-47 add block=======
     ):
         self.pad = tgt_dict.pad()
         self.eos = tgt_dict.eos() if eos is None else eos
         self.softmax_batch = softmax_batch or sys.maxsize
         assert self.softmax_batch > 0
         self.compute_alignment = compute_alignment
+        # =======NLP-47 add block=======
+        self.knnmt_key_type = knnmt_key_type
+        self.save_knnmt_dstore = save_knnmt_dstore
+        # =======NLP-47 add block=======
         self.symbols_to_strip_from_output = (
             symbols_to_strip_from_output.union({self.eos})
             if symbols_to_strip_from_output is not None
@@ -118,12 +128,12 @@ class SequenceScorer(object):
         for i in range(bsz):
             # remove padding from ref
             ref = (
-                utils.strip_pad(sample["target"][i, start_idxs[i] :], self.pad)
+                utils.strip_pad(sample["target"][i, start_idxs[i]:], self.pad)
                 if sample["target"] is not None
                 else None
             )
             tgt_len = ref.numel()
-            avg_probs_i = avg_probs[i][start_idxs[i] : start_idxs[i] + tgt_len]
+            avg_probs_i = avg_probs[i][start_idxs[i]: start_idxs[i] + tgt_len]
             score_i = avg_probs_i.sum() / tgt_len
             if avg_attn is not None:
                 avg_attn_i = avg_attn[i]
@@ -139,6 +149,7 @@ class SequenceScorer(object):
                     alignment = None
             else:
                 avg_attn_i = alignment = None
+
             hypos.append(
                 [
                     {
@@ -147,6 +158,9 @@ class SequenceScorer(object):
                         "attention": avg_attn_i,
                         "alignment": alignment,
                         "positional_scores": avg_probs_i,
+                        # =======NLP-47 add block=======
+                        "dstore_keys_mt": decoder_out[1][self.knnmt_key_type][start_idxs[i]:, i, :] if self.save_knnmt_dstore else None
+                        # =======NLP-47 add block=======
                     }
                 ]
             )

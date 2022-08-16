@@ -547,6 +547,9 @@ class TransformerDecoderLayerBase(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
+        # =======NLP-47 add block=======
+        retrieve_ffn_input: bool = False,
+        # =======NLP-47 add block=======
     ):
         """
         Args:
@@ -657,6 +660,11 @@ class TransformerDecoderLayerBase(nn.Module):
         if self.normalize_before:
             x = self.final_layer_norm(x)
 
+        # =======NLP-47 add block=======
+        if retrieve_ffn_input:
+            ffn_input = x.clone()
+        # =======NLP-47 add block=======
+
         x = self.activation_fn(self.fc1(x))
         x = self.activation_dropout_module(x)
         if self.ffn_layernorm is not None:
@@ -680,6 +688,12 @@ class TransformerDecoderLayerBase(nn.Module):
             else:
                 self_attn_state = [saved_state["prev_key"], saved_state["prev_value"]]
             return x, attn, self_attn_state
+
+        # =======NLP-47 add block=======
+        if retrieve_ffn_input:
+            return x, ((attn, ffn_input)), None
+        # =======NLP-47 add block=======
+
         return x, attn, None
 
     def make_generation_fast_(self, need_attn: bool = False, **kwargs):

@@ -874,6 +874,20 @@ class GenerationConfig(FairseqDataclass):
         default=False,
         metadata={"help": "just score the reference translation"},
     )
+    # =======NLP-47 add block=======
+    save_knnmt_dstore: bool = field(
+        default=False,
+        metadata={"help": "saves knnmt keys and values with the provided data split"},
+    )
+    dstore_path: str = field(
+        default="/home/vipul/Projects/misc-code-tasks/nlp-47/checkpoints/knnmt_datastore/knnmt_dstore",
+        metadata={"help": "path to save the datastore keys & values"}
+    )
+    dstore_chunk_size: int = field(
+        default=100000,
+        metadata={"help": "size of each memmap to save for the knnmt datastore"}
+    )
+    # =======NLP-47 add block=======
     prefix_size: int = field(
         default=0,
         metadata={"help": "initialize generation by target prefix of given length"},

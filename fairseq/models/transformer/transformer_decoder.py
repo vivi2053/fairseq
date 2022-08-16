@@ -67,6 +67,10 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         )
         self.decoder_layerdrop = cfg.decoder.layerdrop
         self.share_input_output_embed = cfg.share_decoder_input_output_embed
+        # =======NLP-47 add block=======
+        # print("knnmt_key_type" in dir(cfg))
+        self.knnmt_key_type = "last_ffn_input"
+        # =======NLP-47 add block=======
 
         input_embed_dim = embed_tokens.embedding_dim
         embed_dim = cfg.decoder.embed_dim
@@ -331,11 +335,23 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         # decoder layers
         attn: Optional[Tensor] = None
         inner_states: List[Optional[Tensor]] = [x]
+
+        # =======NLP-47 add block=======
+        get_ffn_inp: bool = False
+        # =======NLP-47 add block=======
+
         for idx, layer in enumerate(self.layers):
             if incremental_state is None and not full_context_alignment:
                 self_attn_mask = self.buffered_future_mask(x)
             else:
                 self_attn_mask = None
+
+            # =======NLP-47 add block=======
+            if self.knnmt_key_type == 'last_ffn_input' and idx == (len(self.layers)-1):
+                get_ffn_input = True
+            else:
+                get_ffn_input = False
+            # =======NLP-47 add block=======
 
             x, layer_attn, _ = layer(
                 x,
@@ -346,8 +362,20 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
                 self_attn_padding_mask=self_attn_padding_mask,
                 need_attn=bool((idx == alignment_layer)),
                 need_head_weights=bool((idx == alignment_layer)),
+                # =======NLP-47 add block=======
+                retrieve_ffn_input=get_ffn_input
+                # =======NLP-47 add block=======
             )
             inner_states.append(x)
+
+            # =======NLP-47 add block=======
+            if get_ffn_input:
+                if layer_attn is None:
+                    raise ValueError("Cannot use layerdrop with knnlm!")
+                knn_emb = layer_attn[1]
+                layer_attn = layer_attn[0]
+            # =======NLP-47 add block=======
+
             if layer_attn is not None and idx == alignment_layer:
                 attn = layer_attn.float().to(x)
 
@@ -358,6 +386,11 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             # average probabilities over heads
             attn = attn.mean(dim=0)
 
+        # =======NLP-47 add block=======
+        if self.knnmt_key_type == 'out_after_layernorm':
+            knn_emb = x.clone()
+        # =======NLP-47 add block=======
+
         if self.layer_norm is not None:
             x = self.layer_norm(x)
 
@@ -366,6 +399,11 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
 
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
+
+        # =======NLP-47 add block=======
+        if self.knnmt_key_type == 'last_ffn_input' or self.knnmt_key_type == 'out_after_layernorm':
+            return x, {'attn': [attn], 'inner_states': inner_states, self.knnmt_key_type: knn_emb}
+        # =======NLP-47 add block=======
 
         return x, {"attn": [attn], "inner_states": inner_states}
 

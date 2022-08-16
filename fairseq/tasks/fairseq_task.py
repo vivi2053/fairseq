@@ -324,7 +324,11 @@ class FairseqTask(object):
 
         return epoch_iter
 
-    def build_model(self, cfg: FairseqDataclass, from_checkpoint=False):
+    def build_model(self, cfg: FairseqDataclass,
+                    # =======NLP-47 add block=======
+                    gen_cfg=None,
+                    # =======NLP-47 add block=======
+                    from_checkpoint=False):
         """
         Build the :class:`~fairseq.models.BaseFairseqModel` instance for this
         task.
@@ -394,6 +398,9 @@ class FairseqTask(object):
             return SequenceScorer(
                 self.target_dictionary,
                 compute_alignment=getattr(args, "print_alignment", False),
+                # =======NLP-47 add block=======
+                **extra_gen_cls_kwargs
+                # =======NLP-47 add block=======
             )
 
         from fairseq.sequence_generator import (
@@ -464,6 +471,7 @@ class FairseqTask(object):
 
         extra_gen_cls_kwargs = extra_gen_cls_kwargs or {}
         if seq_gen_cls is None:
+
             if getattr(args, "print_alignment", False):
                 seq_gen_cls = SequenceGeneratorWithAlignment
                 extra_gen_cls_kwargs["print_alignment"] = args.print_alignment
