@@ -22,8 +22,8 @@ class SequenceScorer(object):
         # =======NLP-47 add block=======
         lm_model=None,
         lm_weight=1.0,
-        knnmt_key_type=None,
-        save_knnmt_dstore=None
+        generation_cfgs=None,
+        task_cfgs=None
         # =======NLP-47 add block=======
     ):
         self.pad = tgt_dict.pad()
@@ -32,8 +32,8 @@ class SequenceScorer(object):
         assert self.softmax_batch > 0
         self.compute_alignment = compute_alignment
         # =======NLP-47 add block=======
-        self.knnmt_key_type = knnmt_key_type
-        self.save_knnmt_dstore = save_knnmt_dstore
+        self.knnmt_key_type = task_cfgs.knnmt_key_type
+        self.save_knnmt_dstore = generation_cfgs.save_knnmt_dstore
         # =======NLP-47 add block=======
         self.symbols_to_strip_from_output = (
             symbols_to_strip_from_output.union({self.eos})

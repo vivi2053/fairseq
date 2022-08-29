@@ -57,9 +57,8 @@ def get_symbols_to_strip_from_output(generator):
     else:
         return {generator.eos}
 
+
 # =======NLP-47 add block=======
-
-
 def save_size_dict_to_pkl(dstore_path: str, count_dict):
     with open(dstore_path + "_file_counts.pkl", "wb") as outfile:
         pkl.dump(count_dict, outfile)
@@ -98,7 +97,6 @@ def check_dstore_availability(keys_mmap, vals_mmap, num_new_items, dstore_idx, c
         return True, num_new_items
     else:
         return False, chunk_size - dstore_idx
-
 # =======NLP-47 add block=======
 
 
@@ -207,9 +205,12 @@ def _main(cfg: DictConfig, output_file):
 
     # Initialize generator
     gen_timer = StopwatchMeter()
-
     extra_gen_cls_kwargs = {"lm_model": lms[0], "lm_weight": cfg.generation.lm_weight,
-                            "knnmt_key_type": cfg.task.knnmt_key_type, "save_knnmt_dstore": True if cfg.generation.save_knnmt_dstore else False}
+                            # =======NLP-47 add block=======
+                            "generation_cfgs": cfg.generation,
+                            "task_cfgs": cfg.task
+                            # =======NLP-47 add block=======
+                            }
     generator = task.build_generator(
         models, cfg.generation, extra_gen_cls_kwargs=extra_gen_cls_kwargs
     )
@@ -303,7 +304,7 @@ def _main(cfg: DictConfig, output_file):
                                    0, num_items, knnmt_key_size, knnmt_key_dtype, knnmt_val_dtype)
                     dstore_idx += num_items
                 else:
-                    print(num_saved, dstore_chunk_size, dstore_idx, cur_capacity, num_items)
+                    # print(num_saved, dstore_chunk_size, dstore_idx, cur_capacity, num_items)
                     save_in_dstore(dstore_keys, dstore_vals, hypo, dstore_idx, 0, cur_capacity,
                                    knnmt_key_size, knnmt_key_dtype, knnmt_val_dtype)
                     dstore_keys, dstore_vals, cur_subset_count = create_new_dstore(cfg.generation.dstore_path, cur_subset_count, knnmt_key_dtype,
@@ -463,10 +464,14 @@ def _main(cfg: DictConfig, output_file):
         )
 
     # ========NLP-47 add block==========
-    dstore_subset_size[cur_subset_count] = dstore_idx
-    save_size_dict_to_pkl(cfg.generation.dstore_path, dstore_subset_size)
-    print(f"added {num_saved} items to the knnmt dstore!")
-    print(f"added {dstore_idx} items to the last memmap!")
+    if cfg.generation.save_knnmt_dstore:
+        if dstore_keys is not None and dstore_vals is not None:
+            dstore_keys.flush()
+            dstore_vals.flush()
+        dstore_subset_size[cur_subset_count] = dstore_idx
+        save_size_dict_to_pkl(cfg.generation.dstore_path, dstore_subset_size)
+        print(f"added {num_saved} items to the knnmt dstore!")
+        print(f"added {dstore_idx} items to the last memmap!")
     # ========NLP-47 add block==========
 
     logger.info("NOTE: hypothesis and token scores are output in base 2")

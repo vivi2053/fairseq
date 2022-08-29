@@ -6,6 +6,7 @@
 import math
 import sys
 from typing import Dict, List, Optional
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -13,6 +14,7 @@ from torch import Tensor
 
 from fairseq import search, utils
 from fairseq.data import data_utils
+from fairseq.datastore import KNN_Dstore
 from fairseq.models import FairseqIncrementalDecoder
 from fairseq.ngram_repeat_block import NGramRepeatBlock
 
@@ -38,6 +40,10 @@ class SequenceGenerator(nn.Module):
         symbols_to_strip_from_output=None,
         lm_model=None,
         lm_weight=1.0,
+        # =======NLP-47 add block=======
+        generation_cfgs=None,
+        task_cfgs=None,
+        # =======NLP-47 add block=======
         tokens_to_suppress=(),
     ):
         """Generates translations of a given source sentence.
@@ -105,6 +111,16 @@ class SequenceGenerator(nn.Module):
         self.unk_penalty = unk_penalty
         self.temperature = temperature
         self.match_source_len = match_source_len
+
+        # =======NLP-47 add block=======
+        self.generation_cfgs = generation_cfgs
+        self.knnmt = generation_cfgs.knnmt
+        self.knnmt_key_type = task_cfgs.knnmt_key_type
+        self.knnmt_weight = generation_cfgs.knnmt_weight
+
+        if self.knnmt:
+            self.knnmt_dstore = KNN_Dstore(self.vocab_size, generation_cfgs=generation_cfgs)
+        # =======NLP-47 add block=======
 
         if no_repeat_ngram_size > 0:
             self.repeat_ngram_blocker = NGramRepeatBlock(no_repeat_ngram_size)
@@ -274,6 +290,7 @@ class SequenceGenerator(nn.Module):
             encoder_outs = self.model.forward_encoder(net_input)
 
         # placeholder of indices for bsz * beam_size to hold tokens and accumulative scores
+        # [bsz] -> [bsz,1] -> [bsz,beam_size]->[bsz*beam_size]
         new_order = torch.arange(bsz).view(-1, 1).repeat(1, beam_size).view(-1)
         new_order = new_order.to(src_tokens.device).long()
         encoder_outs = self.model.reorder_encoder_out(encoder_outs, new_order)
@@ -356,7 +373,32 @@ class SequenceGenerator(nn.Module):
                     encoder_outs,
                     incremental_states,
                     self.temperature,
+                    # =======NLP-47 add block=======
+                    self.knnmt,
+                    self.knnmt_key_type
+                    # =======NLP-47 add block=======
                 )
+
+            # =======NLP-47 add block=======
+            if self.knnmt:
+                queries = avg_attn_scores[self.knnmt_key_type]
+                if len(avg_attn_scores.keys()) > 2:
+                    del avg_attn_scores[self.knnmt_key_type]
+                else:
+                    avg_attn_scores = avg_attn_scores["attn"]
+
+                knn_lprobs = self.knnmt_dstore.get_scores_per_step(step, queries, self.pad, self.generation_cfgs.knnmt_temp)
+
+                if self.knnmt_weight > 0.0:
+                    assert self.knnmt_weight < 1.0
+                    stacked_lprobs = torch.stack([lprobs, knn_lprobs], dim=0)
+                    coeffs = torch.ones_like(stacked_lprobs)
+                    coeffs[0] = np.log(1 - self.knnmt_weight)
+                    coeffs[1] = np.log(self.knnmt_weight)
+                    lprobs = torch.logsumexp(coeffs + stacked_lprobs, dim=0)
+                # if step == 1:
+                #     exit()
+            # =======NLP-47 add block=======
 
             if self.lm_model is not None:
                 lm_out = self.lm_model(tokens[:, : step + 1])
@@ -374,7 +416,7 @@ class SequenceGenerator(nn.Module):
             # handle max length constraint
             if step >= max_len:
                 lprobs[:, : self.eos] = -math.inf
-                lprobs[:, self.eos + 1 :] = -math.inf
+                lprobs[:, self.eos + 1:] = -math.inf
 
             # handle prefix tokens (possibly with different lengths)
             if (
@@ -604,7 +646,7 @@ class SequenceGenerator(nn.Module):
         if eos_mask.any():
             # validate that the first beam matches the prefix
             first_beam = tokens[eos_mask].view(-1, beam_size, tokens.size(-1))[
-                :, 0, 1 : step + 1
+                :, 0, 1: step + 1
             ]
             eos_mask_batch_dim = eos_mask.view(-1, beam_size)[:, 0]
             target_prefix = prefix_tokens[eos_mask_batch_dim][:, :step]
@@ -649,12 +691,12 @@ class SequenceGenerator(nn.Module):
         # tokens is (batch * beam, max_len). So the index_select
         # gets the newly EOS rows, then selects cols 1..{step + 2}
         tokens_clone = tokens.index_select(0, bbsz_idx)[
-            :, 1 : step + 2
+            :, 1: step + 2
         ]  # skip the first index, which is EOS
 
         tokens_clone[:, step] = self.eos
         attn_clone = (
-            attn.index_select(0, bbsz_idx)[:, :, 1 : step + 2]
+            attn.index_select(0, bbsz_idx)[:, :, 1: step + 2]
             if attn is not None
             else None
         )
@@ -807,6 +849,10 @@ class EnsembleModel(nn.Module):
         encoder_outs: List[Dict[str, List[Tensor]]],
         incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
         temperature: float = 1.0,
+        # =======NLP-47 add block=======
+        knnmt: bool = False,
+        knnmt_key_type: str = "last_ffn_input"
+        # =======NLP-47 add block=======
     ):
         log_probs = []
         avg_attn: Optional[Tensor] = None
@@ -838,6 +884,10 @@ class EnsembleModel(nn.Module):
                         attn = attn_holder
                     elif attn_holder is not None:
                         attn = attn_holder[0]
+                    # =======NLP-47 add block=======
+                    if knnmt:
+                        knn_queries = decoder_out[1][knnmt_key_type]
+                    # =======NLP-47 add block=======
                 if attn is not None:
                     attn = attn[:, -1, :]
 
@@ -849,8 +899,20 @@ class EnsembleModel(nn.Module):
                 decoder_out_tuple, log_probs=True, sample=None
             )
             probs = probs[:, -1, :]
+
+            # =======NLP-47 del block=======
+            # if self.models_size == 1:
+            #     return probs, attn
+            # =======NLP-47 del block=======
+
+            # =======NLP-47 add block=======
             if self.models_size == 1:
+                if knnmt:
+                    return probs, {"attn": attn, knnmt_key_type: knn_queries}
                 return probs, attn
+            elif knnmt:
+                raise ValueError("Cannot use with a real ensemble yet!")
+            # =======NLP-47 add block=======
 
             log_probs.append(probs)
             if attn is not None:

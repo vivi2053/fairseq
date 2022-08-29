@@ -887,6 +887,38 @@ class GenerationConfig(FairseqDataclass):
         default=100000,
         metadata={"help": "size of each memmap to save for the knnmt datastore"}
     )
+    knnmt: bool = field(
+        default=False,
+        metadata={"help": "generate translations in knnmt mode"}
+    )
+    k: int = field(
+        default=16,
+        metadata={"help": "number of nearest neighbors to retreive"}
+    )
+    knnmt_weight: float = field(
+        default=0.1,
+        metadata={"help": "interpolation parameter for KNN module"}
+    )
+    faiss_index_file: str = field(
+        default="path_to_index_file",
+        metadata={"help": "path of the trained index for KNNMT"}
+    )
+    faiss_index_to_gpu: bool = field(
+        default=False,
+        metadata={"help": "move the index to gpu for faster search"}
+    )
+    faiss_nprobe: int = field(
+        default=32,
+        metadata={"help": "number of clusters to be examined in the faiss search"}
+    )
+    load_vals_to_mem: bool = field(
+        default=False,
+        metadata={"help": "load the dstore vals to memory instead of a memmap"}
+    )
+    knnmt_temp: int = field(
+        default=10,
+        metadata={"help": "temperature for knn sampling"}
+    )
     # =======NLP-47 add block=======
     prefix_size: int = field(
         default=0,
