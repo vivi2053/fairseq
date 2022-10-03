@@ -72,6 +72,10 @@ class TranslationMultiSimpleEpochTask(LegacyFairseqTask):
                             action=FileContentsAction)
         parser.add_argument('--keep-inference-langtok', action='store_true',
                             help='keep language tokens in inference output (e.g. for analysis or debugging)')
+        # =======NLP-111 add block=======
+        parser.add_argument('--knnmt-key-type', default="last_ffn_input",
+                            help="feature from the decoder to use as key for knnmt datastore")
+        # =======NLP-111 add block=======
 
         SamplingMethod.add_arguments(parser)
         MultilingualDatasetManager.add_args(parser)

@@ -880,7 +880,7 @@ class GenerationConfig(FairseqDataclass):
         metadata={"help": "saves knnmt keys and values with the provided data split"},
     )
     dstore_path: str = field(
-        default="/home/vipul/Projects/misc-code-tasks/nlp-47/checkpoints/knnmt_datastore/knnmt_dstore",
+        default="/home/vipul/Projects/misc-code-tasks/nlp-111/aspec_dstore/knnmt_dstore",
         metadata={"help": "path to save the datastore keys & values"}
     )
     dstore_chunk_size: int = field(
@@ -892,7 +892,7 @@ class GenerationConfig(FairseqDataclass):
         metadata={"help": "generate translations in knnmt mode"}
     )
     k: int = field(
-        default=16,
+        default=32,
         metadata={"help": "number of nearest neighbors to retreive"}
     )
     knnmt_weight: float = field(
@@ -920,6 +920,12 @@ class GenerationConfig(FairseqDataclass):
         metadata={"help": "temperature for knn sampling"}
     )
     # =======NLP-47 add block=======
+    # =======NLP-111 add block=======
+    dstore_combined: bool = field(
+        default=False,
+        metadata={"help": "datastore combined into single key and value file or not"}
+    )
+    # =======NLP-111 add block=======
     prefix_size: int = field(
         default=0,
         metadata={"help": "initialize generation by target prefix of given length"},

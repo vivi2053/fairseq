@@ -7,7 +7,7 @@ import pickle as pkl
 
 
 class KNN_Dstore:
-    def __init__(self, vocab_size: int, hidden_size: int = 512, lamda: int = 0, generation_cfgs=None):
+    def __init__(self, vocab_size: int, hidden_size: int = 2048, lamda: int = 0, generation_cfgs=None):
         self.vocab_size = vocab_size
         self.k = generation_cfgs.k
         self.hidden_size = hidden_size
@@ -16,6 +16,7 @@ class KNN_Dstore:
         self.val_dtype = np.int64
         self.keys = None
         self.vals = None
+        self.dstore_combined = generation_cfgs.dstore_combined
         self.faiss_index = self.setup_index(generation_cfgs)
 
     def concatenate_subsets(self, gen_cfgs, load_keys=True):
@@ -27,16 +28,21 @@ class KNN_Dstore:
         data_type = np.float32 if load_keys else np.int64
         dim = self.hidden_size if load_keys else 1
         subset_sizes = read_subset_sizes()
-        full_size = sum([vals for vals in subset_sizes.values()])
-        full_array = np.memmap(gen_cfgs.dstore_path+f"_{info_type}_all.npy",
-                               dtype=data_type, mode='w+', shape=(full_size, dim))
+        if self.dstore_combined:
+            full_size = sum([vals for vals in subset_sizes.values()])
+            full_array = np.memmap(gen_cfgs.dstore_path+f"_{info_type}_all.npy",
+                                   dtype=data_type, mode='r', shape=(full_size, dim))
+        else:
+            full_size = sum([vals for vals in subset_sizes.values()])
+            full_array = np.memmap(gen_cfgs.dstore_path+f"_{info_type}_all.npy",
+                                   dtype=data_type, mode='w+', shape=(full_size, dim))
 
-        cur_idx = 0
-        for fname, size in subset_sizes.items():
-            sub_array = np.memmap(gen_cfgs.dstore_path+f"_{info_type}_{str(fname)}.npy",
-                                  dtype=data_type, mode='r', shape=(size, dim))
-            full_array[cur_idx:cur_idx+size, :] = sub_array
-            cur_idx += size
+            cur_idx = 0
+            for fname, size in subset_sizes.items():
+                sub_array = np.memmap(gen_cfgs.dstore_path+f"_{info_type}_{str(fname)}.npy",
+                                      dtype=data_type, mode='r', shape=(size, dim))
+                full_array[cur_idx:cur_idx+size, :] = sub_array
+                cur_idx += size
         return full_array
 
     def setup_index(self, generation_cfgs):

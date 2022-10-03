@@ -1,28 +1,30 @@
-from ast import Pass
 import faiss
 import argparse
 import numpy as np
 import pickle as pkl
 import time
 
-key_dtype = np.float32
+# key_dtype = np.float32
 # val_dtype = np.int
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dstore-path", type=str, default="/home/vipul/Projects/misc-code-tasks/nlp-47/checkpoints/knnmt_datastore/knnmt_dstore",
+    parser.add_argument("--dstore-path", type=str, default="/home/vipul/Projects/misc-code-tasks/nlp-111/aspec_dstore/knnmt_dstore",
                         help="path to where all the key and val files are stored")
-    parser.add_argument('--index-save-path', type=str, default="/home/vipul/Projects/misc-code-tasks/nlp-47/checkpoints/knnmt_datastore/index.trained",
+    parser.add_argument('--index-save-path', type=str, default="/home/ubuntu/filesystem/vipul/Knnmt_Dstores/index.trained",
                         help='path to the file where the index will be saved')
-    parser.add_argument("--key-size", type=int, default=512, help="dimension of each key")
-    parser.add_argument("--ncentroids", type=int, default=100, help="number of centroids that faiss should learn")
-    parser.add_argument("--quant-size", type=int, default=64, help="size of the quantized vector")
+    parser.add_argument("--key-size", type=int, default=2048, help="dimension of each key")
+    parser.add_argument("--ncentroids", type=int, default=20000, help="number of centroids that faiss should learn")
+    parser.add_argument("--quant-size", type=int, default=256, help="size of the quantized vector")
     parser.add_argument('--probe', type=int, default=32, help='number of clusters to query')
     parser.add_argument('--gpu', action='store_true',
                         help="training the index from a mmap that only holds keys needed for training.")
     parser.add_argument("--index-type", type=str, default="ivfpq", help="the type of index to train")
     parser.add_argument("--test", action="store_true", help="train or test index")
+    parser.add_argument("--dstore-combined", action="store_true", help="Dstore combined in a single key and value file or not")
+    parser.add_argument("--train-vec-num", type=str, default="all",
+                        help="number of vectors to use for training the faiss index")
     # parser.add_argument("--", type=str, help="")
     args = parser.parse_args()
     return args
@@ -59,12 +61,17 @@ def train_ivfpq_index(args, full_keys, ngpu):
         print("training ivfpq index on gpu...")
         clustering_index = faiss.index_cpu_to_all_gpus(faiss.IndexFlatL2(args.key_size), ngpu=ngpu)
         index.clustering_index = clustering_index
-        index.train(full_keys[:].astype(np.float32))
+        if args.train_vec_num == 'all':
+            index.train(full_keys[:].astype(np.float32))
+        else:
+            index.train(full_keys[:int(args.train_vec_num)].astype(np.float32))
         print("ntotal: {0}".format(index.ntotal))
-
     else:
         print("training ivfpq index on cpu...might be slow")
-        index.train(full_keys[:].astype(np.float32))
+        if args.train_vec_num == 'all':
+            index.train(full_keys[:].astype(np.float32))
+        else:
+            index.train(full_keys[:int(args.train_vec_num)].astype(np.float32))
     return index
 
 
@@ -74,8 +81,20 @@ def train_flatl2_index(args):
     return index
 
 
+def load_full_data(args, subset_sizes, load_keys=True):
+    data_size = args.key_size if load_keys else 1
+    info_type = "keys" if load_keys else "vals"
+    data_type = np.float32 if load_keys else np.int64
+    full_size = sum([v for v in subset_sizes.values()])
+    full_array = np.memmap(args.dstore_path+f"_{info_type}_all.npy", dtype=data_type, mode='r', shape=(full_size, data_size))
+    return full_array
+
+
 def train_index(args, subset_sizes, ngpu):
-    all_keys = concatenate_subsets(args, subset_sizes)
+    if args.dstore_combined:
+        all_keys = load_full_data(args, subset_sizes)
+    else:
+        all_keys = concatenate_subsets(args, subset_sizes)
 
     start_time = time.time()
 
@@ -98,6 +117,7 @@ def train_index(args, subset_sizes, ngpu):
     index.add(all_keys[:])
     add_end_time = time.time()
     print("Adding keys took {:.3f} s".format(add_end_time-add_start_time))
+    print("ntotal: {0}".format(index.ntotal))
 
     faiss.write_index(index, args.index_save_path)
     print('Writing index took {:.3f} s'.format(time.time()-add_end_time))

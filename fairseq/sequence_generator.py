@@ -119,7 +119,8 @@ class SequenceGenerator(nn.Module):
         self.knnmt_weight = generation_cfgs.knnmt_weight
 
         if self.knnmt:
-            self.knnmt_dstore = KNN_Dstore(self.vocab_size, generation_cfgs=generation_cfgs)
+            self.knnmt_dstore = KNN_Dstore(
+                self.vocab_size, generation_cfgs=generation_cfgs)
         # =======NLP-47 add block=======
 
         if no_repeat_ngram_size > 0:

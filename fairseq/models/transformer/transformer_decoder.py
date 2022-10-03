@@ -68,7 +68,6 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         self.decoder_layerdrop = cfg.decoder.layerdrop
         self.share_input_output_embed = cfg.share_decoder_input_output_embed
         # =======NLP-47 add block=======
-        # print("knnmt_key_type" in dir(cfg))
         self.knnmt_key_type = "last_ffn_input"
         # =======NLP-47 add block=======
 
